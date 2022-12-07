@@ -4,9 +4,6 @@
 -- isomorphic keyboard 
 -- and pattern recorder 
 -- for sketching
--- 
--- talks midi & molly the poly
---
 --
 -- e1     scale
 -- k1+e1  root note
@@ -17,8 +14,6 @@
 --
 pattern_time = require 'pattern_time'
 musicutil = require 'musicutil'
---MollyThePoly = require "molly_the_poly/lib/molly_the_poly_engine"
---engine.name = "MollyThePoly"
 mxsamples=include("mx.samples/lib/mx.samples")
 engine.name="MxSamples"
 
@@ -31,22 +26,10 @@ m = midi.connect()
 --
 -- VARIABLES
 --
-PATH = _path.data.."sketch/"
-bank = 1
-bank_size = 4
-bank_start = 0
+PATH = _path.data.."sketch-mxsamples/"
 selected_voice = 1
-cc = 1
-cc_value = {}
-active_midi_notes = {}
-for i=1,8 do
-  active_midi_notes[i] = {}
-end
 grid_dirty = true
 screen_dirty = true
-for i=1,64 do
-  cc_value[i] = 0
-end
 scale_names = {}
 for i = 1, #musicutil.SCALES do
   table.insert(scale_names, musicutil.SCALES[i].name)
@@ -68,10 +51,7 @@ function init_parameters()
     id="output",
     name="output",
     options={"audio","midi","audio+midi"},
-    default=1,
-    action=function()
-      all_notes_off()
-    end
+    default=1
   }
   params:add{
     type="number",
@@ -89,7 +69,6 @@ function init_parameters()
     max=16,
     default=2
   }
-  
   params:add_group("SKETCH - KEYBOARD",4)
   params:add{
     type="option",
@@ -98,7 +77,6 @@ function init_parameters()
     options=scale_names,
     default=41,
     action=function()
-      all_notes_off()
       build_scale()
     end
   }
@@ -113,7 +91,6 @@ function init_parameters()
       return musicutil.note_num_to_name(param:get(),true)
     end,
     action=function(value)
-      all_notes_off()
       build_scale()
     end
   }
@@ -133,16 +110,10 @@ function init_parameters()
     max=12,
     default=5,
     action=function(value)
-      all_notes_off()
       build_scale()
     end
   }
-end
-
-function init_molly()
-  params:add_group("SKETCH - MOLLY THE POLY",46)
-  --params:add_separator()
-  MollyThePoly.add_params()
+  params:bang()
 end
 
 function init_mxsamples()
@@ -173,13 +144,9 @@ end
 
 function init()
   init_parameters()
---  init_molly()
   init_mxsamples()
-  build_scale()
   init_pattern_recorders()
   init_pset_callbacks()
-  grid_redraw()
-  redraw()
   clock.run(grid_redraw_clock)
   clock.run(redraw_clock)
 end
@@ -273,7 +240,6 @@ end
 --
 function note_on(voice,note_num)
   if params:get("output") == 1 then
-    --engine.noteOn(note_num, musicutil.note_num_to_freq(note_num), vel)
     mx:on(
       {name=params:string(voice.."mx_instrument"),
       midi=note_num,
@@ -284,28 +250,24 @@ function note_on(voice,note_num)
     m:note_on(note_num, vel)
   elseif params:get("output") == 3 then
     m:note_on(note_num, vel)
-    engine.noteOn(note_num, musicutil.note_num_to_freq(note_num), vel)
+    mx:on(
+      {name=params:string(voice.."mx_instrument"),
+      midi=note_num,
+      velocity=params:get(voice.."mx_velocity"),
+      amp=params:get(voice.."mx_amp"),
+      pan=params:get(voice.."mx_pan")})
   end
-  
---  if active_midi_notes[selected_voice][note_num] == nil then
---    active_midi_notes[selected_voice][note_num] = true
---  end
-  --print("note_on:"..musicutil.note_num_to_name(note_num,true))
 end
 
 function note_off(voice,note_num)
   if params:get("output") == 1 then
---    engine.noteOff(note_num)
     mx:off({name=params:string(voice.."mx_instrument"),midi=note_num})
   elseif params:get("output") == 2 then
     m:note_off(note_num)
   elseif params:get("output") == 3 then
     m:note_off(note_num)
-    engine.noteOff(note_num)
+    mx:off({name=params:string(voice.."mx_instrument"),midi=note_num})
   end
-
---  active_midi_notes[selected_voice][note_num] = nil
-  --print("note_off:"..musicutil.note_num_to_name(note_num,true))
 end
 
 function all_notes_off()
@@ -348,16 +310,16 @@ function build_scale()
   end
 
   row_start_note = params:get("root_note")
-  midi_note = {}
+  note = {}
   for row = 8,1,-1 do
     note_value = row_start_note
-    midi_note[row] = {}
+    note[row] = {}
     for col = 3,16 do
-      midi_note[row][col] = {}
-      midi_note[row][col].value = note_value
+      note[row][col] = {}
+      note[row][col].value = note_value
       for i=1,112 do
-        if midi_note[row][col].value == note_nums[i] then
-          midi_note[row][col].in_scale = true
+        if note[row][col].value == note_nums[i] then
+          note[row][col].in_scale = true
         end
       end
       note_value = note_value + 1
@@ -370,7 +332,7 @@ end
 function grid_note(e)
   --local note = ((7-e.y)*5) + e.x
   if e.state > 0 then
-    note_on(e.voice,midi_note[e.y][e.x].value)
+    note_on(e.voice,note[e.y][e.x].value)
     lit[e.id] = {}
     lit[e.id].voice = e.voice
     lit[e.id].pattern = e.pattern
@@ -378,12 +340,10 @@ function grid_note(e)
     lit[e.id].y = e.y
   else
     if lit[e.id] ~= nil then
-      --engine.stop(e.id)
-      note_off(e.voice,midi_note[e.y][e.x].value)
+      note_off(e.voice,note[e.y][e.x].value)
       lit[e.id] = nil
     end
   end
-  --print(e.id.." "..e.state)
   grid_redraw()
 end
 
@@ -403,16 +363,7 @@ function key(n,z)
 end
 
 function enc(n,d)
-  if n > 1 then
-    if shifted then
-      cc = n+1+bank_start
-    else
-      cc = n-1+bank_start
-    end
-    cc_value[(cc)] = util.clamp(cc_value[(cc)] + d,0,127)
-    record_cc1_value()
-    m:cc((cc),cc_value[(cc)],params:get("cc_channel"))
-  elseif shifted and n == 1 then
+  if shifted and n == 1 then
     params:delta("root_note",d)
   elseif n == 1 then
     params:delta("scale",d)
@@ -534,16 +485,15 @@ function grid_redraw()
   for x = 3,16 do
     for y = 8,1,-1 do
       -- scale notes
-      if midi_note[y][x].in_scale == true then
+      if note[y][x].in_scale == true then
         g:led(x,y,4)
       end
       -- root notes
-      if (midi_note[y][x].value - params:get("root_note")) % 12 == 0 then
+      if (note[y][x].value - params:get("root_note")) % 12 == 0 then
         g:led(x,y,8)
       end
     end
   end
-  
   -- lit when pressed
   for i,e in pairs(lit) do
     if e.voice == selected_voice then
